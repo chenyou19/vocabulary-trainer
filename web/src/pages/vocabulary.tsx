@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { BookOpen, ChevronLeft, ChevronRight, Download, FileJson, LibraryBig, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react'
 import { Confirm, EmptyState, ErrorNotice, Loading, Modal, PageHeading, downloadFile, errorMessage } from '../components/ui'
 import { useWords } from '../data/hooks'
+import { fetchProjectVocabulary } from '../data/project-vocabulary'
 import { repository } from '../data/repository'
 import { localDate } from '../domain/dates'
 import { csvExample, parseWordCsv, parseWordJson, splitTags, wordListJson } from '../domain/import'
@@ -72,28 +73,18 @@ function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [paste, setPaste] = useState('')
 
-  async function inspect(read: () => Promise<string>, format: 'json' | 'csv') {
+  async function inspect(load: () => Promise<ImportPreview>) {
     if (busy) return
     setBusy(true)
     setError('')
     setPreview(null)
     try {
-      const source = await read()
-      setPreview(format === 'csv' ? parseWordCsv(source) : parseWordJson(source))
+      setPreview(await load())
     } catch (failure) {
       setError(errorMessage(failure, '無法解析檔案，請確認檔案格式。'))
     } finally {
       setBusy(false)
     }
-  }
-
-  async function importProject() {
-    await inspect(async () => {
-      const url = new URL(`${import.meta.env.BASE_URL}data/toeic_vocabulary.json`, document.baseURI)
-      const response = await fetch(url)
-      if (!response.ok) throw new Error('找不到專案 TOEIC 詞庫。')
-      return response.text()
-    }, 'json')
   }
 
   async function apply() {
@@ -115,18 +106,21 @@ function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported
       <div className="import-source">
         <span className="tile-icon"><LibraryBig size={20} /></span>
         <div><h3>專案 TOEIC 詞庫</h3><p>讀取專案附帶的單字、分類、例句與來源註記。</p></div>
-        <button type="button" className="button button-secondary" onClick={importProject} disabled={busy}>匯入專案 TOEIC 詞庫</button>
+        <button type="button" className="button button-secondary" onClick={() => void inspect(fetchProjectVocabulary)} disabled={busy}>匯入專案 TOEIC 詞庫</button>
       </div>
       <label className="field">選擇 JSON 或 CSV 檔<input type="file" accept=".json,.csv,application/json,text/csv" disabled={busy} onChange={event => {
         const file = event.target.files?.[0]
         event.target.value = ''
-        if (file) void inspect(() => file.text(), file.name.toLowerCase().endsWith('.csv') ? 'csv' : 'json')
+        if (file) void inspect(async () => {
+          const text = await file.text()
+          return file.name.toLowerCase().endsWith('.csv') ? parseWordCsv(text) : parseWordJson(text)
+        })
       }} /></label>
       <button type="button" className="text-button self-start" onClick={() => downloadFile('vocabulary-example.csv', csvExample, 'text/csv;charset=utf-8')}><Download size={16} />下載 CSV 格式範例</button>
       <label className="field">或貼上 JSON／CSV<textarea rows={3} value={paste} onChange={event => setPaste(event.target.value)} placeholder="word,meaning&#10;schedule,行程表" disabled={busy} /></label>
       <button type="button" className="button button-secondary self-start" disabled={!paste.trim() || busy} onClick={() => {
         const first = paste.trim().charAt(0)
-        void inspect(async () => paste, first === '[' || first === '{' ? 'json' : 'csv')
+        void inspect(async () => first === '[' || first === '{' ? parseWordJson(paste) : parseWordCsv(paste))
       }}>檢查貼上的資料</button>
       {busy && <p role="status" className="muted">正在處理詞庫，請稍候…</p>}
       {preview && <div className="notice notice-info" role="status">

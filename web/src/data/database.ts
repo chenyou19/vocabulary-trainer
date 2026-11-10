@@ -1,11 +1,19 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { QuizSession, ReviewLog, Settings, Word } from '../domain/model'
 
+export const vocabularyInitializationId = 'toeic-initialization'
+
+export interface VocabularyInitialization {
+  id: typeof vocabularyInitializationId
+  reason: 'seeded' | 'existing' | 'cleared' | 'restored'
+}
+
 export class TrainerDatabase extends Dexie {
   words!: EntityTable<Word, 'id'>
   reviewLogs!: EntityTable<ReviewLog, 'id'>
   quizSessions!: EntityTable<QuizSession, 'id'>
   settings!: EntityTable<Settings & { id: 'settings' }, 'id'>
+  metadata!: EntityTable<VocabularyInitialization, 'id'>
 
   constructor(name = 'vocabulary-trainer') {
     super(name)
@@ -15,6 +23,7 @@ export class TrainerDatabase extends Dexie {
       quizSessions: 'id, timestamp, status',
       settings: 'id',
     })
+    this.version(2).stores({ metadata: 'id' })
   }
 }
 

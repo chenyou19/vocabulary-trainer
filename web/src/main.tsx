@@ -2,6 +2,7 @@ import { StrictMode, Component } from 'react'
 import type { ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { VocabularyBootstrap } from './components/bootstrap'
 import { Shell } from './components/shell'
 import { ErrorNotice } from './components/ui'
 import { Dashboard } from './pages/dashboard'
@@ -30,7 +31,7 @@ try {
 } catch { /* The page can still load when storage is unavailable. */ }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><ErrorBoundary><HashRouter><Routes>
+  <StrictMode><ErrorBoundary><VocabularyBootstrap><HashRouter><Routes>
     <Route element={<Shell />}>
       <Route index element={<Dashboard />} />
       <Route path="vocabulary" element={<Vocabulary />} />
@@ -40,5 +41,5 @@ createRoot(document.getElementById('root')!).render(
       <Route path="settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route>
-  </Routes></HashRouter></ErrorBoundary></StrictMode>,
+  </Routes></HashRouter></VocabularyBootstrap></ErrorBoundary></StrictMode>,
 )

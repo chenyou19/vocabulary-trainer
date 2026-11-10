@@ -5,7 +5,8 @@ import { validateWordInput } from '../domain/import'
 import { defaultSettings, normalizeText } from '../domain/model'
 import type { QuizQuestion, QuizSession, QuizType, Rating, Settings, Word, WordInput } from '../domain/model'
 import { rateWord } from '../domain/srs'
-import { database, type TrainerDatabase } from './database'
+import { database, vocabularyInitializationId } from './database'
+import type { TrainerDatabase } from './database'
 
 function makeWord(input: WordInput, now: Date): Word {
   const timestamp = now.toISOString()
@@ -16,7 +17,42 @@ function makeWord(input: WordInput, now: Date): Word {
 }
 
 export class Repository {
+  private initialization: Promise<void> | undefined
+
   constructor(readonly db: TrainerDatabase) {}
+
+  initializeProjectVocabulary(load: () => Promise<readonly WordInput[]>, now?: Date): Promise<void> {
+    this.initialization ??= this.seedProjectVocabulary(load, now).finally(() => {
+      this.initialization = undefined
+    })
+    return this.initialization
+  }
+
+  private async seedProjectVocabulary(load: () => Promise<readonly WordInput[]>, now?: Date): Promise<void> {
+    const { words, reviewLogs, quizSessions, settings, metadata } = this.db
+    const tables = [words, reviewLogs, quizSessions, settings, metadata]
+
+    const hasInitialized = async () => {
+      if (await metadata.get(vocabularyInitializationId)) return true
+      const counts = await Promise.all([words.count(), reviewLogs.count(), quizSessions.count(), settings.count()])
+      if (!counts.some(count => count > 0)) return false
+      await metadata.put({ id: vocabularyInitializationId, reason: 'existing' })
+      return true
+    }
+
+    if (await this.db.transaction('rw', tables, hasInitialized)) return
+    const source = await load()
+    if (!source.length) throw new Error('專案 TOEIC 詞庫沒有可用的單字。')
+    const createdAt = now ?? new Date()
+    const additions = source.map(input => makeWord(validateWordInput(input), createdAt))
+
+    await this.db.transaction('rw', tables, async () => {
+      // Another tab can initialize, clear, or restore while this tab downloads the corpus.
+      if (await hasInitialized()) return
+      await words.bulkAdd(additions)
+      await metadata.put({ id: vocabularyInitializationId, reason: 'seeded' })
+    })
+  }
 
   listWords() {
     return this.db.words.toArray()
@@ -177,22 +213,27 @@ export class Repository {
 
   async restore(value: unknown): Promise<void> {
     const backup = validateBackup(value)
-    await this.replace(backup)
+    await this.replace(backup, 'restored')
   }
 
   async clear(): Promise<void> {
-    await this.replace({ words: [], reviewLogs: [], quizSessions: [], settings: defaultSettings })
+    await this.replace({ words: [], reviewLogs: [], quizSessions: [], settings: defaultSettings }, 'cleared')
   }
 
-  private async replace(data: Pick<Backup, 'words' | 'reviewLogs' | 'quizSessions' | 'settings'>): Promise<void> {
-    await this.db.transaction('rw', this.db.words, this.db.reviewLogs, this.db.quizSessions, this.db.settings, async () => {
-      await this.db.reviewLogs.clear()
-      await this.db.quizSessions.clear()
-      await this.db.words.clear()
-      await this.db.words.bulkAdd(data.words)
-      await this.db.quizSessions.bulkAdd(data.quizSessions)
-      await this.db.reviewLogs.bulkAdd(data.reviewLogs)
-      await this.db.settings.put({ ...data.settings, id: 'settings' })
+  private async replace(
+    data: Pick<Backup, 'words' | 'reviewLogs' | 'quizSessions' | 'settings'>,
+    reason: 'cleared' | 'restored',
+  ): Promise<void> {
+    const { words, reviewLogs, quizSessions, settings, metadata } = this.db
+    await this.db.transaction('rw', [words, reviewLogs, quizSessions, settings, metadata], async () => {
+      await reviewLogs.clear()
+      await quizSessions.clear()
+      await words.clear()
+      await words.bulkAdd(data.words)
+      await quizSessions.bulkAdd(data.quizSessions)
+      await reviewLogs.bulkAdd(data.reviewLogs)
+      await settings.put({ ...data.settings, id: 'settings' })
+      await metadata.put({ id: vocabularyInitializationId, reason })
     })
   }
 }
