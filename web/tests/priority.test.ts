@@ -40,28 +40,34 @@ describe('來源優先分組', () => {
     expect(wordPriority({})).toBe(0)
   })
 
-  it('完整詞庫依星級分成最多 50 個字的批次，各層數量與尾組正確', async () => {
+  it('完整詞庫依星級打散並分成最多 50 個字的批次，沒有遺漏或重複', async () => {
     const source = await readFile(new URL('../../toeic_vocabulary.json', import.meta.url), 'utf8')
-    const tiers = groupPriority(parseWordJson(source).words.map(toWord))
+    const words = parseWordJson(source).words.map(toWord)
+    const tiers = groupPriority(words)
     expect(tiers.map(tier => [tier.level, tier.words.length, tier.batches.length, tier.batches.at(-1)?.words.length])).toEqual([
       [5, 2685, 54, 35], [4, 3579, 72, 29], [3, 2719, 55, 19],
       [2, 1220, 25, 20], [1, 951, 20, 1], [0, 0, 0, undefined],
     ])
-    expect(selectPriority(tiers, allPriority)).toHaveLength(11154)
-    expect(selectPriority(tiers, { tier: 5, batch: 1 })[0].word).toBe('a copy of')
-    expect(selectPriority(tiers, { tier: 1, batch: 20 }).map(item => item.word)).toEqual(['zoo'])
+    expect(selectPriority(tiers, allPriority).map(item => item.id).sort()).toEqual(words.map(item => item.id).sort())
+    const firstBatch = selectPriority(tiers, { tier: 5, batch: 1 })
+    const firstWords = firstBatch.map(item => item.normalizedWord)
+    expect(firstWords).not.toEqual([...firstWords].sort())
+    expect(new Set(firstWords.map(item => item[0])).size).toBeGreaterThanOrEqual(10)
+    expect(orderPracticeWords(words, new Set(), date, 'today').slice(0, 50)).toEqual(firstBatch)
   })
 
-  it('先按全庫詞頭分組，排序不受進度、輸入順序、分類及搜尋影響', () => {
+  it('先打散全庫同星級單字，分組不受進度、輸入順序、分類及搜尋影響', () => {
     const source = Array.from({ length: 52 }, (_, index) => word(`word-${String(index).padStart(2, '0')}`, 5))
-    source[51].tags = ['辦公']
     const selection = { tier: 5, batch: 2 } as const
     const before = selectPriority(groupPriority(source), selection)
-    const updated = source.map(item => ({ ...item, stage: 5, correctCount: 9, nextReviewAt: '2026-12-10' })).reverse()
+    const [tagged, searchable] = before
+    const updated = source.map(item => ({
+      ...item, stage: 5, correctCount: 9, nextReviewAt: '2026-12-10', tags: item.id === tagged.id ? ['辦公'] : [],
+    })).reverse()
     const after = selectPriority(groupPriority(updated), selection)
     expect(after.map(item => item.id)).toEqual(before.map(item => item.id))
-    expect(after.filter(item => item.tags.includes('辦公')).map(item => item.id)).toEqual(['word-51'])
-    expect(after.filter(item => item.word.includes('50')).map(item => item.id)).toEqual(['word-50'])
+    expect(after.filter(item => item.tags.includes('辦公')).map(item => item.id)).toEqual([tagged.id])
+    expect(after.filter(item => item.word.includes(searchable.word)).map(item => item.id)).toEqual([searchable.id])
     expect(selectPriority(groupPriority(source), { tier: 5, batch: 3 })).toEqual([])
   })
 
@@ -87,7 +93,8 @@ describe('來源優先分組', () => {
     }
     const lastBatch = selectPriority(tiers, { tier: 5, batch: 2 })
     expect(buildQuiz(lastBatch, lastBatch, 'en-zh', 10)).toEqual([])
-    expect(buildQuiz(lastBatch, lastBatch, 'spelling', 10)).toMatchObject([{ word: 'choice-50', options: [] }])
+    expect(lastBatch).toHaveLength(1)
+    expect(buildQuiz(lastBatch, lastBatch, 'spelling', 10)).toMatchObject([{ word: lastBatch[0].word, options: [] }])
   })
 })
 
@@ -108,7 +115,7 @@ describe('優先背誦與進度', () => {
     expect(summarize([fresh], [], now)).toMatchObject({ learned: 0, due: 0, fresh: 1 })
   })
 
-  it('到期舊字按日期、來源星級、詞頭排，再背高星新字及未分級字', () => {
+  it('到期舊字按日期、來源星級及固定打散順序排，再背高星新字及未分級字', () => {
     const oldest = { ...word('older', 1), nextReviewAt: '2026-11-09' }
     const dueA = word('arrival', 2)
     const dueB = word('branch', 2)
@@ -119,7 +126,8 @@ describe('優先背誦與進度', () => {
     const future = { ...word('future', 5), nextReviewAt: '2026-11-12' }
     const vocabulary = [freshHigh, dueB, future, manual, dueA, freshLow, oldest, dueHigh]
     const reviewed = new Set([oldest, dueA, dueB, dueHigh, future].map(item => item.id))
-    const dueOrder = [oldest, dueHigh, dueA, dueB]
+    const tiedDue = selectPriority(groupPriority(vocabulary), { tier: 2, batch: null })
+    const dueOrder = [oldest, dueHigh, ...tiedDue]
     expect(orderPracticeWords(vocabulary, reviewed, date, 'due')).toEqual(dueOrder)
     expect(orderPracticeWords(vocabulary, reviewed, date, 'today')).toEqual([...dueOrder, freshHigh, freshLow, manual])
     expect(orderPracticeWords(vocabulary, reviewed, date, 'all')).toEqual([...dueOrder, freshHigh, freshLow, manual, future])

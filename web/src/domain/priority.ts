@@ -41,8 +41,20 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+function shuffleKey(normalizedWord: string): number {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < normalizedWord.length; index++) {
+    hash = Math.imul(hash ^ normalizedWord.charCodeAt(index), 0x01000193)
+  }
+  // Mix the bits so similar spellings disperse while each word keeps a stable position.
+  hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b)
+  hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35)
+  return (hash ^ (hash >>> 16)) >>> 0
+}
+
 function compareWords(a: Word, b: Word): number {
-  return compareText(a.normalizedWord, b.normalizedWord) || compareText(a.id, b.id)
+  return shuffleKey(a.normalizedWord) - shuffleKey(b.normalizedWord)
+    || compareText(a.normalizedWord, b.normalizedWord) || compareText(a.id, b.id)
 }
 
 export function comparePriority(a: Word, b: Word): number {

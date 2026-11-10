@@ -29,7 +29,7 @@ export function PriorityPicker({ tiers, selection, onChange, overview = false }:
   return <section className={`priority-picker ${overview ? 'panel priority-overview' : 'priority-compact'}`} aria-label="來源優先分組">
     <div className="panel-heading">
       <span className="tile-icon tone-amber"><Star size={19} /></span>
-      <div><h2>來源優先分組</h2><p>依原詞庫星級安排背誦順序，每組最多 50 個單字。</p></div>
+      <div><h2>來源優先分組</h2><p>先背高星級，同星級採固定的打散順序，每組最多 50 個單字。</p></div>
     </div>
     {overview && <div className="priority-tiers">
       {options.map(item => <button key={item.level} type="button" className="priority-tier"
