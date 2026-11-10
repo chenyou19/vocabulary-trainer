@@ -10,11 +10,19 @@ export function formatAccuracy(value: number | null): string {
   return value === null ? '—' : `${value}%`
 }
 
+export function learnedWordIds(logs: readonly ReviewLog[]): Set<string> {
+  const ids = new Set<string>()
+  for (const log of logs) {
+    if (log.wordId !== null) ids.add(log.wordId)
+  }
+  return ids
+}
+
 export function summarize(words: readonly Word[], logs: readonly ReviewLog[], now = new Date()) {
   const today = localDate(now)
   const dates = Array.from({ length: 7 }, (_, index) => localDate(shiftDate(now, index - 6)))
   const daily = new Map(dates.map(date => [date, { ids: new Set<string>(), correct: 0, answers: 0 }]))
-  const learnedIds = new Set<string>()
+  const learnedIds = learnedWordIds(logs)
   const missed = new Map<string, { word: string; meaning: string; count: number }>()
   const currentWords = new Map(words.map(word => [word.id, word]))
   let quizCorrect = 0
@@ -25,7 +33,6 @@ export function summarize(words: readonly Word[], logs: readonly ReviewLog[], no
     const word = log.wordId ? currentWords.get(log.wordId) ?? log : log
     const key = normalizeText(word.word)
     dailyRecord?.ids.add(key)
-    if (log.wordId) learnedIds.add(log.wordId)
     if (log.mode === 'quiz') {
       quizAnswers++
       if (log.isCorrect) quizCorrect++
@@ -46,11 +53,13 @@ export function summarize(words: readonly Word[], logs: readonly ReviewLog[], no
     return { date, learned: ids.size, accuracy: accuracy(correct, answers), answers }
   })
   const last = week[week.length - 1]
+  const learned = words.filter(word => learnedIds.has(word.id))
 
   return {
     total: words.length,
-    due: words.filter(word => word.nextReviewAt <= today).length,
-    learned: words.filter(word => learnedIds.has(word.id)).length,
+    due: learned.filter(word => word.nextReviewAt <= today).length,
+    learned: learned.length,
+    fresh: words.length - learned.length,
     attempts: logs.length,
     todayLearned: last.learned,
     todayAccuracy: last.accuracy,

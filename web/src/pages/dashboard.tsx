@@ -1,8 +1,9 @@
-import { ArrowRight, BookOpen, CalendarDays, CheckCircle2, Clock3, Layers, Sparkles, Target } from 'lucide-react'
+import { ArrowRight, BookOpen, CalendarDays, CheckCircle2, Clock3, Layers, Sparkles, Star, Target } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ChartPanel, GoalPanel } from '../components/charts'
 import { Loading } from '../components/ui'
 import { useLearningData, useToday } from '../data/hooks'
+import { prioritySearch, wordPriority } from '../domain/priority'
 import { formatAccuracy, summarize } from '../domain/stats'
 
 function Illustration() {
@@ -29,10 +30,12 @@ export function Dashboard() {
   const today = useToday()
   if (!data) return <Loading />
   const stats = summarize(data.words, data.reviewLogs)
+  const hasFiveStars = data.words.some(word => wordPriority(word) === 5)
   const displayDate = new Intl.DateTimeFormat('zh-TW', { dateStyle: 'full' }).format(new Date(`${today}T12:00:00`))
   const metrics = [
     { label: '單字庫總數', value: stats.total.toLocaleString('zh-TW'), unit: '個', icon: BookOpen, tone: 'green' },
     { label: '今日待複習', value: stats.due.toLocaleString('zh-TW'), unit: '個', icon: Clock3, tone: 'amber' },
+    { label: '尚未學習', value: stats.fresh.toLocaleString('zh-TW'), unit: '個', icon: Star, tone: 'amber' },
     { label: '今日已學習', value: stats.todayLearned.toLocaleString('zh-TW'), unit: '個', icon: CheckCircle2, tone: 'green' },
     { label: '今日測驗正確率', value: formatAccuracy(stats.todayAccuracy), unit: '', icon: Target, tone: 'violet' },
   ]
@@ -50,6 +53,9 @@ export function Dashboard() {
           <Link className="button button-primary" to="/flashcards"><Layers size={17} />開始背單字</Link>
           <Link className="button button-hero" to="/quiz">開始測驗<ArrowRight size={17} /></Link>
         </div>
+        {hasFiveStars && <Link className="hero-priority-link" to={`/flashcards${prioritySearch({ tier: 5, batch: null })}`}>
+          <Star size={16} />從 5 星單字開始<ArrowRight size={15} />
+        </Link>}
       </div>
       <Illustration />
     </section>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleHelp, Keyboard, ListChecks, RotateCcw, Trophy, XCircle } from 'lucide-react'
+import { PriorityPicker, usePrioritySelection } from '../components/priority-picker'
 import { AddWordsLink, EmptyState, ErrorNotice, Loading, PageHeading, errorMessage } from '../components/ui'
 import { useLearningData } from '../data/hooks'
 import { repository } from '../data/repository'
@@ -157,6 +158,7 @@ function QuizRound({ round, onExit, onRetry }: {
 
 function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
   const data = useLearningData()
+  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(data?.words)
   const [type, setType] = useState<QuizType>('en-zh')
   const [category, setCategory] = useState('')
   const [mistakes, setMistakes] = useState(false)
@@ -166,9 +168,10 @@ function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
   const categories = useMemo(() => [...new Set(data?.words.flatMap(word => word.tags))].sort((a, b) => a.localeCompare(b, 'zh-TW')), [data])
   const pool = useMemo(() => {
     const wrongIds = new Set(data?.reviewLogs.filter(log => log.mode === 'quiz' && log.isCorrect === false).map(log => log.wordId))
-    return (data?.words ?? []).filter(word => (!category || word.tags.includes(category)) && (!mistakes || wrongIds.has(word.id)))
-  }, [data, category, mistakes])
+    return selectedWords.filter(word => (!category || word.tags.includes(category)) && (!mistakes || wrongIds.has(word.id)))
+  }, [selectedWords, data?.reviewLogs, category, mistakes])
   const canStart = useMemo(() => Boolean(buildQuiz(pool, pool, type, 1).length), [pool, type])
+  const canSwitchToSpelling = useMemo(() => !canStart && type !== 'spelling' && Boolean(buildQuiz(pool, pool, 'spelling', 1).length), [pool, type, canStart])
 
   async function start() {
     if (busy || !canStart) return
@@ -188,6 +191,7 @@ function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
             <span className="mode-content"><span className="tile-icon"><Icon size={21} /></span><strong>{title}</strong><small>{description}</small></span>
           </label>)}
         </div></fieldset>
+        <PriorityPicker tiers={tiers} selection={selection} onChange={setSelection} />
         <div className="setup-fields">
           <label className="field">單字分類<select value={category} onChange={event => setCategory(event.target.value)}>
             <option value="">所有分類</option>{categories.map(tag => <option key={tag}>{tag}</option>)}
@@ -196,15 +200,19 @@ function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
             {[5, 10, 20, 30, 50].map(size => <option key={size} value={size}>{size} 題</option>)}
           </select></label>
           <fieldset><legend>出題範圍</legend><div className="segments">
-            <label><input type="radio" name="quiz-scope" checked={!mistakes} onChange={() => setMistakes(false)} /><span>全部單字</span></label>
+            <label><input type="radio" name="quiz-scope" checked={!mistakes} onChange={() => setMistakes(false)} /><span>符合條件的單字</span></label>
             <label><input type="radio" name="quiz-scope" checked={mistakes} onChange={() => setMistakes(true)} /><span>只測驗錯題</span></label>
           </div></fieldset>
         </div>
-        {!canStart && <p className="notice notice-info">{pool.length === 0 ? '目前的範圍沒有單字，請調整分類或出題範圍。'
+        <p className="priority-scope-summary">所選範圍有 {pool.length.toLocaleString('zh-TW')} 個單字</p>
+        {!canStart && <p className="notice notice-info">{pool.length === 0 ? '目前的範圍沒有單字，請調整星級、分組、分類或出題範圍。'
           : type === 'spelling' ? '這個範圍的中文提示對應多種拼字，請改選其他範圍或題型。'
-          : '這個範圍無法組成四個不同選項。可改選拼字測驗，或擴大出題範圍。'}</p>}
+          : canSwitchToSpelling ? '這個範圍無法組成四個不同選項，可以用拼字測驗。' : '這個範圍無法組成四個不同選項，請調整出題範圍。'}</p>}
         {error && <ErrorNotice message={error} />}
-        <button className="button button-primary" type="button" disabled={!canStart || busy} onClick={() => void start()}>{busy ? '準備中…' : '開始測驗'}<ArrowRight size={17} /></button>
+        <div className="priority-actions">
+          <button className="button button-primary" type="button" disabled={!canStart || busy} onClick={() => void start()}>{busy ? '準備中…' : '開始測驗'}<ArrowRight size={17} /></button>
+          {canSwitchToSpelling && <button className="button button-secondary" type="button" onClick={() => setType('spelling')}>改用拼字測驗</button>}
+        </div>
   </section>
 }
 

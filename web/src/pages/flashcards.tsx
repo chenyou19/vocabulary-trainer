@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Brain, Check, CircleHelp, Layers, RotateCcw, Sparkles } from 'lucide-react'
 import { AddWordsLink, EmptyState, ErrorNotice, Loading, PageHeading, SpeakButton, errorMessage } from '../components/ui'
-import { useToday, useWords } from '../data/hooks'
+import { PriorityMark, PriorityPicker, usePrioritySelection } from '../components/priority-picker'
+import { useLearningData, useToday } from '../data/hooks'
 import { repository } from '../data/repository'
 import type { Direction, Rating, Word } from '../domain/model'
+import { allPriority, orderPracticeWords, priorityProgress } from '../domain/priority'
+import type { PracticeScope } from '../domain/priority'
+import { learnedWordIds } from '../domain/stats'
 
-type Scope = 'due' | 'all'
 type QueueEntry = { word: Word; logId: string; replay: boolean }
 
 function entry(word: Word, replay = false): QueueEntry {
@@ -80,7 +83,7 @@ function StudyRound({ initial, direction, onExit }: { initial: Word[]; direction
     <div className="progress-track" role="progressbar" aria-label="單字卡進度" aria-valuemin={0} aria-valuemax={queue.length} aria-valuenow={index}><span style={{ width: `${progress}%` }} /></div>
     <div className="flashcard-wrap">
       <button className={`flashcard ${flipped ? 'flashcard-back' : ''}`} type="button" ref={flipButton} aria-pressed={flipped} onClick={() => setFlipped(value => !value)} disabled={busy}>
-        <span className="card-corner"><Layers size={20} /> 單字卡</span>
+        <span className="card-corner"><Layers size={20} /> 單字卡 <PriorityMark word={word} /></span>
         <span className="card-face">
           <span className="card-side">{inEnglish ? '英文' : '中文'}</span>
           <strong className={inEnglish ? 'card-english' : 'card-meaning'} lang={inEnglish ? 'en' : 'zh-TW'}>{primary}</strong>
@@ -108,21 +111,31 @@ function StudyRound({ initial, direction, onExit }: { initial: Word[]; direction
 }
 
 function FlashcardSetup({ onBegin }: { onBegin: (round: { words: Word[]; direction: Direction }) => void }) {
-  const words = useWords()
+  const data = useLearningData()
   const today = useToday()
-  const [scope, setScope] = useState<Scope>('due')
+  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(data?.words)
+  const learnedIds = useMemo(() => learnedWordIds(data?.reviewLogs ?? []), [data?.reviewLogs])
+  const [scope, setScope] = useState<PracticeScope>('today')
   const [direction, setDirection] = useState<Direction>('en-zh')
   const [count, setCount] = useState(20)
-  const due = words?.filter(word => word.nextReviewAt <= today) ?? []
-  const available = scope === 'due' ? due : words ?? []
+  const available = useMemo(() => orderPracticeWords(selectedWords, learnedIds, today, scope), [selectedWords, learnedIds, today, scope])
+  const progress = priorityProgress(selectedWords, learnedIds, today)
+  const dueOutside = selection.tier === null ? 0 : priorityProgress(data?.words ?? [], learnedIds, today).due - progress.due
 
-  if (!words) return <Loading />
-  if (!words.length) return <EmptyState title="還沒有可以練習的單字" description="先新增幾個單字，或從專案 TOEIC 詞庫匯入。" action={<AddWordsLink />} />
+  if (!data) return <Loading />
+  if (!data.words.length) return <EmptyState title="還沒有可以練習的單字" description="先新增幾個單字，或從專案 TOEIC 詞庫匯入。" action={<AddWordsLink />} />
   return <section className="panel setup-panel">
-        <div className="panel-heading"><span className="tile-icon"><Brain size={21} /></span><div><h2>開始一輪單字卡</h2><p>今日有 {due.length.toLocaleString('zh-TW')} 個單字可複習。</p></div></div>
+        <div className="panel-heading"><span className="tile-icon"><Brain size={21} /></span><div><h2>開始一輪單字卡</h2><p>先複習已到期的單字，再背來源星級較高的新字。</p></div></div>
+        <PriorityPicker tiers={tiers} selection={selection} onChange={setSelection} />
+        <p className="priority-scope-summary">所選範圍 · 到期 {progress.due.toLocaleString('zh-TW')} 個 · 新單字 {progress.fresh.toLocaleString('zh-TW')} 個</p>
+        {dueOutside > 0 && <div className="notice notice-info priority-outside">
+          <p>這個範圍以外還有 {dueOutside.toLocaleString('zh-TW')} 個到期單字。</p>
+          <button className="text-button" type="button" onClick={() => { setSelection(allPriority); setScope('due') }}>複習全部到期</button>
+        </div>}
         <div className="setup-fields">
           <fieldset><legend>單字範圍</legend><div className="segments">
-            <label><input type="radio" name="scope" checked={scope === 'due'} onChange={() => setScope('due')} /><span>今日待複習</span></label>
+            <label><input type="radio" name="scope" checked={scope === 'today'} onChange={() => setScope('today')} /><span>今日練習</span></label>
+            <label><input type="radio" name="scope" checked={scope === 'due'} onChange={() => setScope('due')} /><span>只複習到期</span></label>
             <label><input type="radio" name="scope" checked={scope === 'all'} onChange={() => setScope('all')} /><span>全部單字</span></label>
           </div></fieldset>
           <fieldset><legend>卡片方向</legend><div className="segments">
@@ -133,10 +146,11 @@ function FlashcardSetup({ onBegin }: { onBegin: (round: { words: Word[]; directi
             <option value={10}>最多 10 張</option><option value={20}>最多 20 張</option><option value={50}>最多 50 張</option>
           </select></label>
         </div>
-        {available.length === 0 && <p className="notice notice-info">今天沒有到期單字，可以切換至「全部單字」繼續練習。</p>}
+        {available.length === 0 && <p className="notice notice-info">{selectedWords.length
+          ? '這個範圍目前沒有符合的單字，可切換練習範圍或選擇其他組別。'
+          : '這個星級或分組沒有單字，可選擇其他組別。'}</p>}
         <button className="button button-primary" disabled={!available.length} onClick={() => {
-          const sorted = [...available].sort((a, b) => a.nextReviewAt.localeCompare(b.nextReviewAt) || a.createdAt.localeCompare(b.createdAt) || a.word.localeCompare(b.word))
-          onBegin({ words: sorted.slice(0, count), direction })
+          onBegin({ words: available.slice(0, count), direction })
         }}>開始背單字<ArrowRight size={17} /></button>
   </section>
 }

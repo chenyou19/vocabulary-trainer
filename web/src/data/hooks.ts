@@ -3,10 +3,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { localDate } from '../domain/dates'
 import { repository } from './repository'
 
-export function useWords() {
-  return useLiveQuery(() => repository.listWords(), [])
-}
-
 export function useSettings() {
   return useLiveQuery(() => repository.getSettings(), [])
 }

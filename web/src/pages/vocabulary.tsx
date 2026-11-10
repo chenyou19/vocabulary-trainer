@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { BookOpen, ChevronLeft, ChevronRight, Download, FileJson, LibraryBig, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { PriorityMark, PriorityPicker, usePrioritySelection } from '../components/priority-picker'
 import { Confirm, EmptyState, ErrorNotice, Loading, Modal, PageHeading, downloadFile, errorMessage } from '../components/ui'
-import { useWords } from '../data/hooks'
+import { useLearningData, useToday } from '../data/hooks'
 import { fetchProjectVocabulary } from '../data/project-vocabulary'
 import { repository } from '../data/repository'
 import { localDate } from '../domain/dates'
@@ -10,6 +12,8 @@ import { csvExample, parseWordCsv, parseWordJson, splitTags, wordListJson } from
 import type { ImportPreview } from '../domain/import'
 import { normalizeText, stageLabel } from '../domain/model'
 import type { Word } from '../domain/model'
+import { allPriority, priorityLabel, priorityProgress, prioritySearch } from '../domain/priority'
+import { learnedWordIds } from '../domain/stats'
 
 const pageSize = 12
 const emptyWord = { word: '', meaning: '', partOfSpeech: '', example: '', exampleTranslation: '', tags: [] }
@@ -137,10 +141,14 @@ function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported
 }
 
 export function Vocabulary() {
-  const words = useWords()
+  const data = useLearningData()
+  const words = data?.words
+  const today = useToday()
+  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(words)
+  const learnedIds = useMemo(() => learnedWordIds(data?.reviewLogs ?? []), [data?.reviewLogs])
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('')
-  const [order, setOrder] = useState('newest')
+  const [order, setOrder] = useState('priority')
   const [page, setPage] = useState(1)
   const [editor, setEditor] = useState<Word | null | undefined>(undefined)
   const [removing, setRemoving] = useState<Word | null>(null)
@@ -149,16 +157,19 @@ export function Vocabulary() {
   const categories = useMemo(() => [...new Set(words?.flatMap(word => word.tags))].sort((a, b) => a.localeCompare(b, 'zh-TW')), [words])
   const filtered = useMemo(() => {
     const key = normalizeText(query)
-    return (words ?? []).filter(word =>
+    const matches = selectedWords.filter(word =>
       (!category || word.tags.includes(category))
       && (!key || [word.word, word.meaning, ...word.tags].some(value => normalizeText(value).includes(key))
         || word.sourceEntries?.some(entry => normalizeText(entry.chinese_definition).includes(key))),
-    ).sort((a, b) => {
+    )
+    if (order === 'priority') return matches
+    return matches.sort((a, b) => {
       if (order === 'learning') return a.stage - b.stage || a.nextReviewAt.localeCompare(b.nextReviewAt) || a.word.localeCompare(b.word)
       const byDate = a.createdAt.localeCompare(b.createdAt)
       return (order === 'newest' ? -byDate : byDate) || a.word.localeCompare(b.word)
     })
-  }, [words, query, category, order])
+  }, [selectedWords, query, category, order])
+  const progress = selection.tier !== null && selectedWords.length ? priorityProgress(selectedWords, learnedIds, today) : null
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
@@ -169,6 +180,20 @@ export function Vocabulary() {
         <button className="button button-primary" type="button" onClick={() => setEditor(null)}><Plus size={18} />新增單字</button></>} />
     {message && <p className="notice notice-success" role="status">{message}</p>}
     {!words ? <Loading /> : <>
+      {words.length > 0 && <PriorityPicker tiers={tiers} selection={selection} overview onChange={next => { setSelection(next); setPage(1) }} />}
+      {progress && selection.tier !== null && <section className="panel priority-progress">
+        <div>
+          <h2>{priorityLabel(selection.tier)}{selection.batch !== null ? ` · 第 ${selection.batch} 組` : ''}</h2>
+          <p>已練習 {progress.learned} / {progress.total} 個 · 到期 {progress.due} 個 · 新單字 {progress.fresh} 個 · 已熟練 {progress.proficient} 個</p>
+          <div className="progress-track" role="progressbar" aria-label="分組練習進度" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.learned}>
+            <span style={{ width: `${progress.learned / progress.total * 100}%` }} />
+          </div>
+        </div>
+        <div className="priority-actions">
+          <Link className="button button-primary" to={`/flashcards${prioritySearch(selection)}`}>{selection.batch === null ? '背這個星級' : '背這組'}</Link>
+          <Link className="button button-secondary" to={`/quiz${prioritySearch(selection)}`}>{selection.batch === null ? '測驗這個星級' : '測驗這組'}</Link>
+        </div>
+      </section>}
       <section className="panel library-controls" aria-label="搜尋與篩選單字">
         <label className="search-field"><Search size={19} /><span className="sr-only">搜尋單字</span>
           <input value={query} onChange={event => { setQuery(event.target.value); setPage(1) }} placeholder="搜尋英文、中文或標籤" type="search" />
@@ -177,20 +202,20 @@ export function Vocabulary() {
           <option value="">所有分類</option>{categories.map(tag => <option key={tag}>{tag}</option>)}
         </select></label>
         <label className="filter-field"><span className="sr-only">排序方式</span><select value={order} onChange={event => { setOrder(event.target.value); setPage(1) }}>
-          <option value="newest">最新新增</option><option value="oldest">最早新增</option><option value="learning">熟練度由低至高</option>
+          <option value="priority">來源星級由高至低</option><option value="newest">最新新增</option><option value="oldest">最早新增</option><option value="learning">熟練度由低至高</option>
         </select></label>
       </section>
       <div className="list-toolbar"><span>顯示 {filtered.length.toLocaleString('zh-TW')} 個單字</span>
         <button type="button" className="text-button" disabled={!words.length} onClick={() => downloadFile(`vocabulary-${localDate()}.json`, wordListJson(words), 'application/json')}><FileJson size={17} />匯出單字 JSON</button>
       </div>
       {visible.length === 0 ? <EmptyState title={words.length ? '找不到符合的單字' : '你的單字庫還是空的'}
-        description={words.length ? '試試其他關鍵字，或調整分類篩選。' : '新增一個想記住的單字，或匯入專案附帶的 TOEIC 詞庫。'}
-        action={words.length ? <button className="button button-secondary" onClick={() => { setQuery(''); setCategory(''); setPage(1) }}>清除篩選</button>
+        description={words.length ? '試試其他關鍵字，或調整星級、分組及分類。' : '新增一個想記住的單字，或匯入專案附帶的 TOEIC 詞庫。'}
+        action={words.length ? <button className="button button-secondary" onClick={() => { setQuery(''); setCategory(''); setSelection(allPriority); setPage(1) }}>清除篩選</button>
           : <button className="button button-primary" onClick={() => setImporting(true)}><BookOpen size={17} />匯入 TOEIC 詞庫</button>} />
         : <div className="panel vocabulary-list">
           {visible.map(word => <article className="word-row" key={word.id}>
             <div className="word-primary"><h2 lang="en">{word.word}</h2><p>{word.meaning}{word.partOfSpeech && <span className="part-of-speech"> · {word.partOfSpeech}</span>}</p>
-              <div className="tags">{word.tags.map(tag => <span className="tag" key={tag}>{tag}</span>)}</div></div>
+              <div className="tags"><PriorityMark word={word} />{word.tags.map(tag => <span className="tag" key={tag}>{tag}</span>)}</div></div>
             <div className="word-progress"><span className={`stage stage-${Math.min(3, Math.ceil(word.stage / 2))}`}>{stageLabel(word.stage)}</span>
               <small>複習 {word.nextReviewAt}</small></div>
             <div className="row-actions">
