@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleHelp, Keyboard, ListChecks, RotateCcw, Trophy, XCircle } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { MissingPdfList, PdfPracticeLink } from '../components/pdf-practice'
 import { PriorityPicker, usePrioritySelection } from '../components/priority-picker'
 import { AddWordsLink, EmptyState, ErrorNotice, Loading, PageHeading, errorMessage } from '../components/ui'
-import { useLearningData } from '../data/hooks'
+import { useLearningData, useToday } from '../data/hooks'
+import { pdfPracticeInputs, pdfPracticeWords, savePdfPracticeWords } from '../data/pdf-practice'
+import { findPdfList } from '../data/pdf-vocabulary'
+import type { PdfList } from '../data/pdf-vocabulary'
 import { repository } from '../data/repository'
 import { quizLabels } from '../domain/model'
 import type { QuizQuestion, QuizSession, QuizType, Word } from '../domain/model'
@@ -19,11 +24,12 @@ interface Round {
   session: QuizSession
   questions: QuizQuestion[]
   notice: string
+  pdfWords?: Word[]
 }
 
 interface Answer { entered: string; correct: boolean }
 
-async function prepareRound(words: Word[], quizType: QuizType, size: number, allowSpelling = false): Promise<Round> {
+async function prepareRound(words: Word[], quizType: QuizType, size: number, allowSpelling = false, pdf = false): Promise<Round> {
   let questions = buildQuiz(words, words, quizType, size)
   let notice = ''
   if (!questions.length && allowSpelling && quizType !== 'spelling') {
@@ -33,8 +39,15 @@ async function prepareRound(words: Word[], quizType: QuizType, size: number, all
   }
   if (!questions.length) throw new Error('目前的範圍沒有適合的題目，請調整分類或測驗模式。')
   if (questions.length < size && !notice) notice = `此範圍可出 ${questions.length} 題，本次先練習這些題目。`
+  let pdfWords: Word[] | undefined
+  if (pdf) {
+    const byId = new Map(words.map(word => [word.id, word]))
+    const stored = await savePdfPracticeWords(questions.map(question => byId.get(question.wordId)!))
+    pdfWords = stored
+    questions = questions.map((question, index) => ({ ...question, wordId: stored[index].id }))
+  }
   const session = await repository.startQuiz(quizType, questions.length)
-  return { questions, session, notice }
+  return { questions, session, notice, pdfWords }
 }
 
 function QuizRound({ round, onExit, onRetry }: {
@@ -156,20 +169,22 @@ function QuizRound({ round, onExit, onRetry }: {
   </div>
 }
 
-function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
+function QuizSetup({ onBegin, pdfList }: { onBegin: (round: Round) => void; pdfList?: PdfList }) {
   const data = useLearningData()
-  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(data?.words)
+  const today = useToday()
+  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(pdfList ? undefined : data?.words)
+  const words = useMemo(() => pdfList && data ? pdfPracticeWords(pdfPracticeInputs(pdfList), data.words, today) : selectedWords, [pdfList, data, today, selectedWords])
   const [type, setType] = useState<QuizType>('en-zh')
   const [category, setCategory] = useState('')
   const [mistakes, setMistakes] = useState(false)
-  const [count, setCount] = useState(10)
+  const [count, setCount] = useState(pdfList ? 0 : 10)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const categories = useMemo(() => [...new Set(data?.words.flatMap(word => word.tags))].sort((a, b) => a.localeCompare(b, 'zh-TW')), [data])
+  const categories = useMemo(() => pdfList ? [] : [...new Set(data?.words.flatMap(word => word.tags))].sort((a, b) => a.localeCompare(b, 'zh-TW')), [data, pdfList])
   const pool = useMemo(() => {
     const wrongIds = new Set(data?.reviewLogs.filter(log => log.mode === 'quiz' && log.isCorrect === false).map(log => log.wordId))
-    return selectedWords.filter(word => (!category || word.tags.includes(category)) && (!mistakes || wrongIds.has(word.id)))
-  }, [selectedWords, data?.reviewLogs, category, mistakes])
+    return words.filter(word => (!category || word.tags.includes(category)) && (!mistakes || wrongIds.has(word.id)))
+  }, [words, data?.reviewLogs, category, mistakes])
   const canStart = useMemo(() => Boolean(buildQuiz(pool, pool, type, 1).length), [pool, type])
   const canSwitchToSpelling = useMemo(() => !canStart && type !== 'spelling' && Boolean(buildQuiz(pool, pool, 'spelling', 1).length), [pool, type, canStart])
 
@@ -177,13 +192,13 @@ function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
     if (busy || !canStart) return
     setBusy(true)
     setError('')
-    try { onBegin(await prepareRound(pool, type, count)) }
+    try { onBegin(await prepareRound(pool, type, count || pool.length, false, Boolean(pdfList))) }
     catch (failure) { setError(errorMessage(failure, '無法開始測驗，請再試一次。')) }
     finally { setBusy(false) }
   }
 
   if (!data) return <Loading />
-  if (!data.words.length) return <EmptyState title="還沒有可以測驗的單字" description="先在單字庫新增或匯入單字，再回來做測驗。" action={<AddWordsLink />} />
+  if (!pdfList && !data.words.length) return <EmptyState title="還沒有可以測驗的單字" description="先在單字庫新增或匯入單字，再回來做測驗。" action={<AddWordsLink />} />
   return <section className="panel setup-panel quiz-setup">
         <fieldset><legend>測驗模式</legend><div className="mode-grid">
           {modes.map(({ id, title, description, icon: Icon }) => <label className="mode-card" key={id}>
@@ -191,21 +206,22 @@ function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
             <span className="mode-content"><span className="tile-icon"><Icon size={21} /></span><strong>{title}</strong><small>{description}</small></span>
           </label>)}
         </div></fieldset>
-        <PriorityPicker tiers={tiers} selection={selection} onChange={setSelection} />
+        {!pdfList && <PriorityPicker tiers={tiers} selection={selection} onChange={setSelection} />}
         <div className="setup-fields">
-          <label className="field">單字分類<select value={category} onChange={event => setCategory(event.target.value)}>
+          {!pdfList && <label className="field">單字分類<select value={category} onChange={event => setCategory(event.target.value)}>
             <option value="">所有分類</option>{categories.map(tag => <option key={tag}>{tag}</option>)}
-          </select></label>
+          </select></label>}
           <label className="field">測驗題數<select value={count} onChange={event => setCount(Number(event.target.value))}>
+            {pdfList && <option value={0}>這組所有可出題詞條</option>}
             {[5, 10, 20, 30, 50].map(size => <option key={size} value={size}>{size} 題</option>)}
           </select></label>
           <fieldset><legend>出題範圍</legend><div className="segments">
-            <label><input type="radio" name="quiz-scope" checked={!mistakes} onChange={() => setMistakes(false)} /><span>符合條件的單字</span></label>
+            <label><input type="radio" name="quiz-scope" checked={!mistakes} onChange={() => setMistakes(false)} /><span>{pdfList ? '這組全部單字' : '符合條件的單字'}</span></label>
             <label><input type="radio" name="quiz-scope" checked={mistakes} onChange={() => setMistakes(true)} /><span>只測驗錯題</span></label>
           </div></fieldset>
         </div>
         <p className="priority-scope-summary">所選範圍有 {pool.length.toLocaleString('zh-TW')} 個單字</p>
-        {!canStart && <p className="notice notice-info">{pool.length === 0 ? '目前的範圍沒有單字，請調整星級、分組、分類或出題範圍。'
+        {!canStart && <p className="notice notice-info">{pool.length === 0 ? (pdfList ? '這組目前沒有符合條件的單字。' : '目前的範圍沒有單字，請調整星級、分組、分類或出題範圍。')
           : type === 'spelling' ? '這個範圍的中文提示對應多種拼字，請改選其他範圍或題型。'
           : canSwitchToSpelling ? '這個範圍無法組成四個不同選項，可以用拼字測驗。' : '這個範圍無法組成四個不同選項，請調整出題範圍。'}</p>}
         {error && <ErrorNotice message={error} />}
@@ -216,13 +232,22 @@ function QuizSetup({ onBegin }: { onBegin: (round: Round) => void }) {
   </section>
 }
 
-export function Quiz() {
+function QuizPage({ pdfList, missingList }: { pdfList?: PdfList; missingList: boolean }) {
   const [round, setRound] = useState<Round | null>(null)
   return <div className="page practice-page">
-    <PageHeading label="測試記憶" title="單字測驗" description="選擇題型與單字範圍，作答後就能看到正確答案。" />
-    {round ? <QuizRound key={round.session.id} round={round} onExit={() => setRound(null)} onRetry={async (ids, mode) => {
-      const words = await repository.wordsById(ids)
-      setRound(await prepareRound(words, mode, ids.length, true))
-    }} /> : <QuizSetup onBegin={setRound} />}
+    <PageHeading label="測試記憶" title={pdfList ? `PDF List ${pdfList.number} 測驗` : '單字測驗'}
+      description={pdfList ? `${pdfList.chapter} · 原書第 ${pdfList.printedPage} 頁` : '選擇題型與單字範圍，作答後就能看到正確答案。'}
+      action={pdfList && <PdfPracticeLink list={pdfList} />} />
+    {missingList ? <MissingPdfList /> : round ? <QuizRound key={round.session.id} round={round} onExit={() => setRound(null)} onRetry={async (ids, mode) => {
+      const words = round.pdfWords ? round.pdfWords.filter(word => ids.includes(word.id)) : await repository.wordsById(ids)
+      setRound(await prepareRound(words, mode, ids.length, true, Boolean(pdfList)))
+    }} /> : <QuizSetup onBegin={setRound} pdfList={pdfList} />}
   </div>
+}
+
+export function Quiz() {
+  const [params] = useSearchParams()
+  const number = params.get('pdfList')
+  const pdfList = findPdfList(number)
+  return <QuizPage key={number} pdfList={pdfList} missingList={number !== null && !pdfList} />
 }

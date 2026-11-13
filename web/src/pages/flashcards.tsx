@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Brain, Check, CircleHelp, Layers, RotateCcw, Sparkles } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { MissingPdfList, PdfPracticeLink } from '../components/pdf-practice'
 import { AddWordsLink, EmptyState, ErrorNotice, Loading, PageHeading, SpeakButton, errorMessage } from '../components/ui'
 import { PriorityMark, PriorityPicker, usePrioritySelection } from '../components/priority-picker'
 import { useLearningData, useToday } from '../data/hooks'
+import { pdfPracticeInputs, pdfPracticeWords, savePdfPracticeWords } from '../data/pdf-practice'
+import { findPdfList } from '../data/pdf-vocabulary'
+import type { PdfList } from '../data/pdf-vocabulary'
 import { repository } from '../data/repository'
 import type { Direction, Rating, Word } from '../domain/model'
 import { allPriority, orderPracticeWords, priorityProgress } from '../domain/priority'
@@ -15,7 +20,7 @@ function entry(word: Word, replay = false): QueueEntry {
   return { word, logId: crypto.randomUUID(), replay }
 }
 
-function StudyRound({ initial, direction, onExit }: { initial: Word[]; direction: Direction; onExit: () => void }) {
+function StudyRound({ initial, direction, onExit, pdfList }: { initial: Word[]; direction: Direction; onExit: () => void; pdfList?: PdfList }) {
   const [queue, setQueue] = useState(() => initial.map(word => entry(word)))
   const [index, setIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
@@ -41,7 +46,7 @@ function StudyRound({ initial, direction, onExit }: { initial: Word[]; direction
     setBusy(true)
     setError('')
     try {
-      await repository.rate(current.word.id, rating, current.logId)
+      await repository.rate(current.word.id, rating, current.logId, undefined, pdfList ? current.word : undefined)
       setResults(previous => new Map(previous).set(current.word.id, { word: current.word, rating }))
       if (rating === 'again') setQueue(previous => [...previous, entry(current.word, true)])
       setFlipped(false)
@@ -83,7 +88,7 @@ function StudyRound({ initial, direction, onExit }: { initial: Word[]; direction
     <div className="progress-track" role="progressbar" aria-label="單字卡進度" aria-valuemin={0} aria-valuemax={queue.length} aria-valuenow={index}><span style={{ width: `${progress}%` }} /></div>
     <div className="flashcard-wrap">
       <button className={`flashcard ${flipped ? 'flashcard-back' : ''}`} type="button" ref={flipButton} aria-pressed={flipped} onClick={() => setFlipped(value => !value)} disabled={busy}>
-        <span className="card-corner"><Layers size={20} /> 單字卡 <PriorityMark word={word} /></span>
+        <span className="card-corner"><Layers size={20} /> 單字卡 {pdfList ? <span className="tag">PDF List {pdfList.number}</span> : <PriorityMark word={word} />}</span>
         <span className="card-face">
           <span className="card-side">{inEnglish ? '英文' : '中文'}</span>
           <strong className={inEnglish ? 'card-english' : 'card-meaning'} lang={inEnglish ? 'en' : 'zh-TW'}>{primary}</strong>
@@ -110,23 +115,40 @@ function StudyRound({ initial, direction, onExit }: { initial: Word[]; direction
   </div>
 }
 
-function FlashcardSetup({ onBegin }: { onBegin: (round: { words: Word[]; direction: Direction }) => void }) {
+function FlashcardSetup({ onBegin, pdfList }: { onBegin: (round: { words: Word[]; direction: Direction }) => void; pdfList?: PdfList }) {
   const data = useLearningData()
   const today = useToday()
-  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(data?.words)
+  const { tiers, selection, selectedWords, setSelection } = usePrioritySelection(pdfList ? undefined : data?.words)
+  const words = useMemo(() => pdfList && data ? pdfPracticeWords(pdfPracticeInputs(pdfList), data.words, today) : selectedWords, [pdfList, data, today, selectedWords])
   const learnedIds = useMemo(() => learnedWordIds(data?.reviewLogs ?? []), [data?.reviewLogs])
-  const [scope, setScope] = useState<PracticeScope>('today')
+  const [scope, setScope] = useState<PracticeScope>(pdfList ? 'all' : 'today')
   const [direction, setDirection] = useState<Direction>('en-zh')
-  const [count, setCount] = useState(20)
-  const available = useMemo(() => orderPracticeWords(selectedWords, learnedIds, today, scope), [selectedWords, learnedIds, today, scope])
-  const progress = priorityProgress(selectedWords, learnedIds, today)
-  const dueOutside = selection.tier === null ? 0 : priorityProgress(data?.words ?? [], learnedIds, today).due - progress.due
+  const [count, setCount] = useState(pdfList ? 0 : 20)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const available = useMemo(() => pdfList && scope === 'all' ? words : orderPracticeWords(words, learnedIds, today, scope), [pdfList, words, learnedIds, today, scope])
+  const progress = priorityProgress(words, learnedIds, today)
+  const dueOutside = pdfList || selection.tier === null ? 0 : priorityProgress(data?.words ?? [], learnedIds, today).due - progress.due
+
+  async function start() {
+    if (busy || !available.length) return
+    setBusy(true)
+    setError('')
+    try {
+      const selected = count ? available.slice(0, count) : available
+      onBegin({ words: pdfList ? await savePdfPracticeWords(selected) : selected, direction })
+    } catch (failure) {
+      setError(errorMessage(failure, '無法開始背單字，請再試一次。'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (!data) return <Loading />
-  if (!data.words.length) return <EmptyState title="還沒有可以練習的單字" description="先新增幾個單字，或從專案 TOEIC 詞庫匯入。" action={<AddWordsLink />} />
+  if (!pdfList && !data.words.length) return <EmptyState title="還沒有可以練習的單字" description="先新增幾個單字，或從專案 TOEIC 詞庫匯入。" action={<AddWordsLink />} />
   return <section className="panel setup-panel">
-        <div className="panel-heading"><span className="tile-icon"><Brain size={21} /></span><div><h2>開始一輪單字卡</h2><p>先複習已到期的單字，再背來源星級較高的新字。</p></div></div>
-        <PriorityPicker tiers={tiers} selection={selection} onChange={setSelection} />
+        <div className="panel-heading"><span className="tile-icon"><Brain size={21} /></span><div><h2>開始一輪單字卡</h2><p>{pdfList ? `這組共有 ${words.length} 個單字與片語。` : '先複習已到期的單字，再背來源星級較高的新字。'}</p></div></div>
+        {!pdfList && <PriorityPicker tiers={tiers} selection={selection} onChange={setSelection} />}
         <p className="priority-scope-summary">所選範圍 · 到期 {progress.due.toLocaleString('zh-TW')} 個 · 新單字 {progress.fresh.toLocaleString('zh-TW')} 個</p>
         {dueOutside > 0 && <div className="notice notice-info priority-outside">
           <p>這個範圍以外還有 {dueOutside.toLocaleString('zh-TW')} 個到期單字。</p>
@@ -143,22 +165,33 @@ function FlashcardSetup({ onBegin }: { onBegin: (round: { words: Word[]; directi
             <label><input type="radio" name="direction" checked={direction === 'zh-en'} onChange={() => setDirection('zh-en')} /><span>中翻英</span></label>
           </div></fieldset>
           <label className="field">本輪張數<select value={count} onChange={event => setCount(Number(event.target.value))}>
+            {pdfList && <option value={0}>這組全部單字</option>}
             <option value={10}>最多 10 張</option><option value={20}>最多 20 張</option><option value={50}>最多 50 張</option>
           </select></label>
         </div>
-        {available.length === 0 && <p className="notice notice-info">{selectedWords.length
-          ? '這個範圍目前沒有符合的單字，可切換練習範圍或選擇其他組別。'
+        {available.length === 0 && <p className="notice notice-info">{words.length
+          ? (pdfList ? '這組目前沒有到期單字，可切換練習範圍。' : '這個範圍目前沒有符合的單字，可切換練習範圍或選擇其他組別。')
           : '這個星級或分組沒有單字，可選擇其他組別。'}</p>}
-        <button className="button button-primary" disabled={!available.length} onClick={() => {
-          onBegin({ words: available.slice(0, count), direction })
-        }}>開始背單字<ArrowRight size={17} /></button>
+        {error && <ErrorNotice message={error} />}
+        <button className="button button-primary" disabled={!available.length || busy} onClick={() => void start()}>{busy ? '準備中…' : '開始背單字'}<ArrowRight size={17} /></button>
   </section>
 }
 
-export function Flashcards() {
+function FlashcardPage({ pdfList, missingList }: { pdfList?: PdfList; missingList: boolean }) {
   const [round, setRound] = useState<{ words: Word[]; direction: Direction } | null>(null)
   return <div className="page practice-page">
-    <PageHeading label="間隔複習" title="單字卡" description="先回想，再翻面確認。依記憶程度安排下次複習。" />
-    {round ? <StudyRound initial={round.words} direction={round.direction} onExit={() => setRound(null)} /> : <FlashcardSetup onBegin={setRound} />}
+    <PageHeading label="間隔複習" title={pdfList ? `PDF List ${pdfList.number} 單字卡` : '單字卡'}
+      description={pdfList ? `${pdfList.chapter} · 原書第 ${pdfList.printedPage} 頁` : '先回想，再翻面確認。依記憶程度安排下次複習。'}
+      action={pdfList && <PdfPracticeLink list={pdfList} />} />
+    {missingList ? <MissingPdfList /> : round
+      ? <StudyRound initial={round.words} direction={round.direction} onExit={() => setRound(null)} pdfList={pdfList} />
+      : <FlashcardSetup onBegin={setRound} pdfList={pdfList} />}
   </div>
+}
+
+export function Flashcards() {
+  const [params] = useSearchParams()
+  const number = params.get('pdfList')
+  const pdfList = findPdfList(number)
+  return <FlashcardPage key={number} pdfList={pdfList} missingList={number !== null && !pdfList} />
 }

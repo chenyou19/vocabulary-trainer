@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TrainerDatabase } from '../src/data/database'
+import { pdfPracticeInputs, pdfPracticeWords } from '../src/data/pdf-practice'
+import { findPdfList } from '../src/data/pdf-vocabulary'
 import { Repository } from '../src/data/repository'
 import { parseBackup } from '../src/domain/backup'
 import { parseWordJson } from '../src/domain/import'
@@ -84,6 +86,31 @@ describe('IndexedDB', () => {
     })
     expect(await repo.importWords(source.words, today)).toEqual({ added: 0, existing: 2 })
     expect(await repo.snapshot(today)).toEqual(afterImport)
+  })
+
+  it('PDF 練習採用本組譯義，並重用既有單字的進度與識別碼', async () => {
+    const lobby = await repo.addWord(input('Lobby', '我的譯義'), yesterday)
+    await repo.rate(lobby.id, 'good', 'previous-rating', yesterday)
+    const stored = await repo.listWords()
+    const location = pdfPracticeWords(pdfPracticeInputs(findPdfList('7')!), stored, '2026-11-10')
+    const verbs = pdfPracticeWords(pdfPracticeInputs(findPdfList('24')!), stored, '2026-11-10')
+    expect(location.find(word => word.id === lobby.id)?.meaning).toBe('會客室,休息室')
+    const card = verbs.find(word => word.id === lobby.id)!
+    expect(card).toMatchObject({ word: 'lobby', meaning: '遊說.(名詞:大廳)', stage: 1 })
+    expect(location.some(word => word.word === 'portray')).toBe(false)
+    expect(findPdfList('20')).toBeUndefined()
+    expect(pdfPracticeInputs(findPdfList('25')!).filter(word => word.word === 'innovate')).toHaveLength(1)
+
+    const additions = [card, input('portray', '描寫')]
+    const [first, second] = await Promise.all([
+      repo.ensurePracticeWords(additions, today), repo.ensurePracticeWords(additions, today),
+    ])
+    expect(first).toEqual(second)
+    expect(first[0]).toEqual(await db.words.get(lobby.id))
+    expect(await db.words.count()).toBe(2)
+    await repo.rate(lobby.id, 'good', 'pdf-rating', today, card)
+    expect(await db.words.get(lobby.id)).toMatchObject({ meaning: '我的譯義', stage: 2 })
+    expect(await db.reviewLogs.get('pdf-rating')).toMatchObject({ wordId: lobby.id, meaning: card.meaning })
   })
 
   it('重試複習及測驗寫入時，只計一次且保留首次作答', async () => {

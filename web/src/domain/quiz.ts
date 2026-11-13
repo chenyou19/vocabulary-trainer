@@ -18,7 +18,7 @@ function meaningKeys(word: Word): Set<string> {
   const meanings = [word.meaning, ...(word.sourceEntries?.map(entry => entry.chinese_definition) ?? [])]
   return new Set(meanings.flatMap(meaning => {
     const withoutNotes = meaning.normalize('NFKC').replace(/\([^()]*\)/g, '')
-    return [meaning, ...withoutNotes.split(/[;；,，、。/／\n]/)].map(normalizeText).filter(Boolean)
+    return [meaning, ...withoutNotes.split(/[;；,，、。/／\n]|(?<=\p{Script=Han})\.+\s*(?=\p{Script=Han})/u)].map(normalizeText).filter(Boolean)
   }))
 }
 

@@ -201,7 +201,8 @@ fieldset { min-width: 0; }
 .list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 9px; color: var(--muted); font-size: .83rem; }
 .vocabulary-list { padding: 0 15px; }
 .pdf-list { padding: 15px; }
-.pdf-list-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 12px; }
+.pdf-list-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+.pdf-list-header > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .pdf-list-header p { color: var(--muted); font-size: .82rem; }
 .pdf-list dl { margin: 0; }
 .pdf-word { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }

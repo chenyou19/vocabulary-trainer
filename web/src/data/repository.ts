@@ -8,10 +8,10 @@ import { rateWord } from '../domain/srs'
 import { database, vocabularyInitializationId } from './database'
 import type { TrainerDatabase } from './database'
 
-function makeWord(input: WordInput, now: Date): Word {
+export function makeWord(input: WordInput, now: Date, id: string = crypto.randomUUID()): Word {
   const timestamp = now.toISOString()
   return {
-    ...input, id: crypto.randomUUID(), normalizedWord: normalizeText(input.word),
+    ...input, id, normalizedWord: normalizeText(input.word),
     createdAt: timestamp, updatedAt: timestamp, stage: 0, nextReviewAt: localDate(now), correctCount: 0, wrongCount: 0,
   }
 }
@@ -60,6 +60,21 @@ export class Repository {
 
   async wordsById(ids: string[]): Promise<Word[]> {
     return (await this.db.words.bulkGet(ids)).filter(word => word !== undefined)
+  }
+
+  async ensurePracticeWords(inputs: readonly WordInput[], now = new Date()): Promise<Word[]> {
+    const additions = inputs.map(input => makeWord(validateWordInput(input), now))
+    const { words } = this.db
+    return this.db.transaction('rw', words, async () => {
+      const existing = await words.where('normalizedWord').anyOf(additions.map(word => word.normalizedWord)).toArray()
+      const byWord = new Map(existing.map(word => [word.normalizedWord, word]))
+      for (const word of additions) {
+        if (byWord.has(word.normalizedWord)) continue
+        await words.add(word)
+        byWord.set(word.normalizedWord, word)
+      }
+      return additions.map(word => byWord.get(word.normalizedWord)!)
+    })
   }
 
   async addWord(value: unknown, now = new Date()): Promise<Word> {
@@ -137,7 +152,7 @@ export class Repository {
     })
   }
 
-  async rate(id: string, rating: Rating, logId: string, now = new Date()): Promise<void> {
+  async rate(id: string, rating: Rating, logId: string, now = new Date(), card?: Pick<Word, 'word' | 'meaning'>): Promise<void> {
     await this.db.transaction('rw', this.db.words, this.db.reviewLogs, async () => {
       if (await this.db.reviewLogs.get(logId)) return
       const word = await this.db.words.get(id)
@@ -146,7 +161,7 @@ export class Repository {
       const timestamp = now.toISOString()
       await this.db.words.update(id, { ...progress, updatedAt: timestamp })
       await this.db.reviewLogs.add({
-        id: logId, wordId: word.id, word: word.word, meaning: word.meaning, timestamp, date: localDate(now),
+        id: logId, wordId: word.id, word: card?.word ?? word.word, meaning: card?.meaning ?? word.meaning, timestamp, date: localDate(now),
         mode: 'flashcard', rating, isCorrect, sessionId: null, questionIndex: null,
       })
     })

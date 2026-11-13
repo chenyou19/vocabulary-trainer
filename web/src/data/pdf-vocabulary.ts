@@ -570,3 +570,13 @@ export const pdfVocabulary: readonly PdfVocabularyChapter[] = [
     ],
   },
 ]
+
+export const pdfLists = pdfVocabulary.flatMap(({ title, lists }) =>
+  lists.map(list => ({ ...list, chapter: title })),
+)
+
+export type PdfList = (typeof pdfLists)[number]
+
+export function findPdfList(number: string | null) {
+  return pdfLists.find(list => String(list.number) === number && list.entries.length > 0)
+}
