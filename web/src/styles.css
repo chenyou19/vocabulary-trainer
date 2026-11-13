@@ -200,6 +200,13 @@ fieldset { min-width: 0; }
 .search-field input { padding-left: 39px; }
 .list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 9px; color: var(--muted); font-size: .83rem; }
 .vocabulary-list { padding: 0 15px; }
+.pdf-list { padding: 15px; }
+.pdf-list-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 12px; }
+.pdf-list-header p { color: var(--muted); font-size: .82rem; }
+.pdf-list dl { margin: 0; }
+.pdf-word { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.pdf-word dt { font-weight: 700; }
+.pdf-word dd { margin: 0; color: var(--muted); }
 .word-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(105px, 19%) auto; align-items: center; gap: 15px; min-height: 87px; padding: 12px 4px; }
 .word-row + .word-row { border-top: 1px solid var(--border); }
 .word-primary { min-width: 0; overflow-wrap: anywhere; }
@@ -355,7 +362,7 @@ fieldset { min-width: 0; }
   .brand-icon svg { width: 19px; }
   .sidebar-label, .sidebar-footer, .desktop-label { display: none; }
   .mobile-label { display: block; }
-  .navigation { position: fixed; z-index: 4; inset: auto 0 0; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; padding: 5px 4px max(5px, env(safe-area-inset-bottom)); background: var(--sidebar); border-top: 1px solid var(--border); }
+  .navigation { position: fixed; z-index: 4; inset: auto 0 0; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 5px 4px max(5px, env(safe-area-inset-bottom)); background: var(--sidebar); border-top: 1px solid var(--border); }
   .navigation a { flex-direction: column; justify-content: center; min-height: 48px; gap: 3px; padding: 3px 1px; font-size: .68rem; border-radius: 7px; }
   .navigation a svg { width: 18px; height: 18px; }
   .main-content { padding: 21px 15px calc(82px + env(safe-area-inset-bottom)); }
@@ -384,6 +391,7 @@ fieldset { min-width: 0; }
   .search-field { grid-column: 1 / -1; }
   .word-row { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 9px; padding: 9px 0; }
   .word-progress { grid-row: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+  .pdf-word { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .row-actions { grid-column: 2; grid-row: 1 / 3; flex-direction: column; }
   .vocabulary-list { padding-inline: 9px; }
   .form-grid, .setup-fields { grid-template-columns: 1fr; }

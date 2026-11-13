@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { BookOpen, ChartNoAxesColumnIncreasing, Database, House, Layers, Library, ListChecks, Settings2 } from 'lucide-react'
+import { BookOpen, ChartNoAxesColumnIncreasing, Database, FileText, House, Layers, Library, ListChecks, Settings2 } from 'lucide-react'
 import { useSettings } from '../data/hooks'
 
 const items = [
   { to: '/', label: '學習首頁', short: '首頁', icon: House },
   { to: '/vocabulary', label: '單字庫', short: '單字', icon: Library },
+  { to: '/pdf-vocabulary', label: 'PDF 單字', short: 'PDF', icon: FileText },
   { to: '/flashcards', label: '單字卡', short: '卡片', icon: Layers },
   { to: '/quiz', label: '單字測驗', short: '測驗', icon: ListChecks },
   { to: '/statistics', label: '學習統計', short: '統計', icon: ChartNoAxesColumnIncreasing },

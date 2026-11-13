@@ -7,6 +7,7 @@ import { Shell } from './components/shell'
 import { ErrorNotice } from './components/ui'
 import { Dashboard } from './pages/dashboard'
 import { Vocabulary } from './pages/vocabulary'
+import { PdfVocabulary } from './pages/pdf-vocabulary'
 import { Flashcards } from './pages/flashcards'
 import { Quiz } from './pages/quiz'
 import { Statistics } from './pages/statistics'
@@ -35,6 +36,7 @@ createRoot(document.getElementById('root')!).render(
     <Route element={<Shell />}>
       <Route index element={<Dashboard />} />
       <Route path="vocabulary" element={<Vocabulary />} />
+      <Route path="pdf-vocabulary" element={<PdfVocabulary />} />
       <Route path="flashcards" element={<Flashcards />} />
       <Route path="quiz" element={<Quiz />} />
       <Route path="statistics" element={<Statistics />} />
